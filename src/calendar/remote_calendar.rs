@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
+use log::warn;
 use reqwest::{header::CONTENT_TYPE, header::CONTENT_LENGTH};
 use csscolorparser::Color;
 use url::Url;
@@ -65,7 +66,7 @@ impl BaseCalendar for RemoteCalendar {
 
     async fn add_item(&mut self, item: Item) -> Result<SyncStatus, Box<dyn Error>> {
         let ical_text = crate::ical::build_from(&item)?;
-
+        
         let response = reqwest::Client::new()
             .put(item.url().clone())
             .header("If-None-Match", "*")
@@ -82,7 +83,12 @@ impl BaseCalendar for RemoteCalendar {
 
         let reply_hdrs = response.headers();
         match reply_hdrs.get("ETag") {
-            None => Err(format!("No ETag in these response headers: {:?} (request was {:?})", reply_hdrs, item.url()).into()),
+            None => {
+                // Servers only **should** return an etag... therefore servers won't
+                // https://icalendar.org/CalDAV-Access-RFC-4791/5-3-4-calendar-object-resource-entity-tag.html
+                warn!("No ETag in these response headers: {:?} (request was {:?})", reply_hdrs, item.url());
+                Ok(SyncStatus::Synced(VersionTag::from(chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string())))
+            },
             Some(etag) => {
                 let vtag_str = etag.to_str()?;
                 let vtag = VersionTag::from(String::from(vtag_str));
